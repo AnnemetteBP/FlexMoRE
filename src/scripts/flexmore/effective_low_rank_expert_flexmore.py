@@ -14,31 +14,27 @@ log = logging.getLogger(__name__)
 
 def compute_effective_rank(
     singular_values: torch.Tensor,
-    rel_thresh: float = 1e-3,
-    abs_thresh: float = 1e-8,
-) -> int:
+    relative_threshold: float = 1e-3,
+    threshold: float = 0.0,
+) -> tuple[int, int, float]:
     singular_values = singular_values.to(dtype=torch.float64)
+    max_singular_value = singular_values.max().item()
 
-    max_sv = singular_values.max().item()
-    threshold = 0.0
-    if rel_thresh > 0:
-        threshold = max(threshold, max_sv * rel_thresh)
-    if abs_thresh > 0:
-        threshold = max(threshold, abs_thresh)
+    if relative_threshold > 0:
+        threshold = max(threshold, max_singular_value * relative_threshold)
+    if threshold > 0:
+        singular_values = singular_values[singular_values >= threshold]
 
-    filtered = singular_values[singular_values >= threshold]
-    if filtered.numel() == 0:
-        return 1
-
-    norm = filtered.sum()
+    norm = singular_values.sum()
     if norm <= 0:
-        return 1
+        return 1, 0, threshold
 
-    probabilities = filtered / norm
+    probabilities = singular_values / norm
     nonzero_probabilities = probabilities[probabilities > 0]
     entropy = -(nonzero_probabilities * nonzero_probabilities.log()).sum()
     effective_rank = torch.exp(entropy).item()
-    return max(1, math.ceil(effective_rank))
+    rank = max(1, min(singular_values.numel(), math.ceil(effective_rank)))
+    return rank, singular_values.numel(), threshold
 
 def main(
     model_path: str = typer.Argument(..., help="Path to the FlexOLMo model in HF format"),
@@ -58,16 +54,28 @@ def main(
         ],
         help="List of modules to apply LoRA to",
     ),
-    relative_threshold: float = typer.Option(
+    effective_rank_relative_threshold: float = typer.Option(
         1e-3,
-        help="Relative singular-value threshold as a fraction of the maximum singular value",
+        help=(
+            "When rank is 0, ignore singular values smaller than this fraction "
+            "of the largest singular value before computing entropy effective rank. "
+            "Use 0 to recover the unthresholded paper definition."
+        ),
     ),
-    absolute_threshold: float = typer.Option(
+    effective_rank_absolute_threshold: float = typer.Option(
         1e-8,
-        help="Absolute singular-value threshold to treat tiny values as noise",
+        help=(
+            "When rank is 0, ignore singular values smaller than this absolute value "
+            "before computing entropy effective rank. This is combined with the relative "
+            "threshold by using the stricter cutoff."
+        ),
     ),
 ):
     prepare_cli_environment()
+    if effective_rank_relative_threshold < 0:
+        raise ValueError("effective_rank_relative_threshold must be non-negative")
+    if effective_rank_absolute_threshold < 0:
+        raise ValueError("effective_rank_absolute_threshold must be non-negative")
     log.info(f"Setting number of threads for SVD computation to {processes}")
     torch.set_num_threads(processes)
 
@@ -113,14 +121,17 @@ def main(
                         log.info(f"Computing SVD for key {model_key} with shape {delta_expert.shape}")
                         key2usvh[model_key] = torch.linalg.svd(delta_expert, full_matrices=False)
                     _, s, _ = key2usvh[model_key]
-                    resolved_ranks[model_key] = compute_effective_rank(
+                    resolved_ranks[model_key], num_significant, effective_rank_threshold = compute_effective_rank(
                         s,
-                        rel_thresh=relative_threshold,
-                        abs_thresh=absolute_threshold,
+                        relative_threshold=effective_rank_relative_threshold,
+                        threshold=effective_rank_absolute_threshold,
                     )
                     log.info(
                         f"Effective rank for key {model_key}: {resolved_ranks[model_key]} "
-                        f"(from {s.numel()} singular values)"
+                        f"(from {num_significant} significant singular values "
+                        f"out of {s.numel()}, threshold {effective_rank_threshold}, "
+                        f"relative threshold {effective_rank_relative_threshold}, "
+                        f"absolute threshold {effective_rank_absolute_threshold})"
                     )
             assert resolved_ranks, "No LoRA-enabled expert layers found for effective-rank computation"
             model_rank = max(resolved_ranks.values())

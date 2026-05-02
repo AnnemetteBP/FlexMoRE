@@ -124,13 +124,19 @@ def main(
         [],
         help="Optional subset of expert model names to analyze",
     ),
-    relative_threshold: float = typer.Option(
+    effective_rank_relative_threshold: float = typer.Option(
         1e-3,
-        help="Relative singular-value threshold as a fraction of the maximum singular value",
+        help=(
+            "When rank is 0, ignore singular values smaller than this fraction "
+            "of the largest singular value before computing entropy effective rank."
+        ),
     ),
-    absolute_threshold: float = typer.Option(
+    effective_rank_absolute_threshold: float = typer.Option(
         1e-8,
-        help="Absolute singular-value threshold to treat tiny values as noise",
+        help=(
+            "When rank is 0, ignore singular values smaller than this absolute value "
+            "before computing entropy effective rank."
+        ),
     ),
     metrics_dir: str = typer.Option(
         "/media/am/AM/FlexMoRE/src/scripts/analysis/results/expert_mlp_metrics",
@@ -174,8 +180,8 @@ def main(
                 expert_tensors,
                 lora_modules,
                 key2usvh,
-                rel_thresh=relative_threshold,
-                abs_thresh=absolute_threshold,
+                relative_threshold=effective_rank_relative_threshold,
+                absolute_threshold=effective_rank_absolute_threshold,
             )
             triplets = collect_expert_triplets(expert_tensors, lora_modules)
             metric_rows = compute_triplet_metrics(triplets, effective_ranks)
@@ -184,8 +190,8 @@ def main(
                 effective_ranks,
                 model_name=model_name,
                 model_path=repo_id,
-                rel_thresh=relative_threshold,
-                abs_thresh=absolute_threshold,
+                relative_threshold=effective_rank_relative_threshold,
+                absolute_threshold=effective_rank_absolute_threshold,
             )
             summaries.append(summary)
 
