@@ -51,3 +51,10 @@ __pycache__
 
 docs/build
 site/
+
+
+# custom
+
+flexmore-venv/
+src/scripts/analysis/results/
+svd_cache.pkl

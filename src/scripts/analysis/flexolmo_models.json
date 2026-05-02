@@ -1,0 +1,16 @@
+public_models = {
+    "Public": "allenai/Flex-public-7B-1T",
+}
+
+expert_models = {
+    "Math": "allenai/Flex-math-2x7B-1T",
+    "News": "allenai/Flex-news-2x7B-1T",
+    "Academic": "allenai/Flex-pes2o-2x7B-1T",
+    "Code": "allenai/Flex-code-2x7B-1T",
+    "Creative Writing": "allenai/Flex-creative-2x7B-1T",
+    "Reddit": "allenai/Flex-reddit-2x7B-1T"
+}
+
+flex_olmo_models = {
+    "FlexOlmo-7x7B-1T": "allenai/FlexOlmo-7x7B-1T",
+}

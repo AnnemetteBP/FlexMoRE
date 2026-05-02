@@ -12,22 +12,38 @@ from olmo_core.utils import prepare_cli_environment
 log = logging.getLogger(__name__)
 
 
-def compute_effective_rank(singular_values: torch.Tensor) -> int:
+def compute_effective_rank(
+    singular_values: torch.Tensor,
+    rel_thresh: float = 1e-3,
+    abs_thresh: float = 1e-8,
+) -> int:
     singular_values = singular_values.to(dtype=torch.float64)
-    norm = singular_values.sum()
+
+    max_sv = singular_values.max().item()
+    threshold = 0.0
+    if rel_thresh > 0:
+        threshold = max(threshold, max_sv * rel_thresh)
+    if abs_thresh > 0:
+        threshold = max(threshold, abs_thresh)
+
+    filtered = singular_values[singular_values >= threshold]
+    if filtered.numel() == 0:
+        return 1
+
+    norm = filtered.sum()
     if norm <= 0:
         return 1
 
-    probabilities = singular_values / norm
+    probabilities = filtered / norm
     nonzero_probabilities = probabilities[probabilities > 0]
     entropy = -(nonzero_probabilities * nonzero_probabilities.log()).sum()
     effective_rank = torch.exp(entropy).item()
-    return max(1, min(singular_values.numel(), math.ceil(effective_rank)))
+    return max(1, math.ceil(effective_rank))
 
 def main(
     model_path: str = typer.Argument(..., help="Path to the FlexOLMo model in HF format"),
     rank: list[int] = typer.Option(
-        [0, 1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384],
+        [0,1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384],
         help="Rank for the low-rank adapters to be applied to each linear layer",
     ),
     processes: int = typer.Option(
@@ -41,6 +57,14 @@ def main(
             "up_proj",
         ],
         help="List of modules to apply LoRA to",
+    ),
+    relative_threshold: float = typer.Option(
+        1e-3,
+        help="Relative singular-value threshold as a fraction of the maximum singular value",
+    ),
+    absolute_threshold: float = typer.Option(
+        1e-8,
+        help="Absolute singular-value threshold to treat tiny values as noise",
     ),
 ):
     prepare_cli_environment()
@@ -89,7 +113,11 @@ def main(
                         log.info(f"Computing SVD for key {model_key} with shape {delta_expert.shape}")
                         key2usvh[model_key] = torch.linalg.svd(delta_expert, full_matrices=False)
                     _, s, _ = key2usvh[model_key]
-                    resolved_ranks[model_key] = compute_effective_rank(s)
+                    resolved_ranks[model_key] = compute_effective_rank(
+                        s,
+                        rel_thresh=relative_threshold,
+                        abs_thresh=absolute_threshold,
+                    )
                     log.info(
                         f"Effective rank for key {model_key}: {resolved_ranks[model_key]} "
                         f"(from {s.numel()} singular values)"
