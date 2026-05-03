@@ -162,7 +162,7 @@ def resolve_weighted_ranks(
 def main(
     model_path: str = typer.Argument(..., help="Path to the FlexOLMo model in HF format"),
     rank: list[int] = typer.Option(
-        [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384],
+        [0,1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384],
         help="Rank for the low-rank adapters to be applied to each linear layer",
     ),
     processes: int = typer.Option(1, help="Number of processes for SVD computation"),

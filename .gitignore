@@ -58,3 +58,4 @@ site/
 flexmore-venv/
 src/scripts/analysis/results/
 svd_cache.pkl
+NOTES/
