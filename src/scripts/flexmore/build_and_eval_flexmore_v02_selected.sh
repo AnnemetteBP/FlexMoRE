@@ -26,9 +26,24 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${ROOT_DIR}"
+export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 
-BASE_MODEL_ROOT="${BASE_MODEL_ROOT:-work/training/FlexMoRE/models}"
-RANKED_MODEL_ROOT="${RANKED_MODEL_ROOT:-work/training/FlexMoRE/eval_results/models}"
+if [[ -z "${BASE_MODEL_ROOT:-}" ]]; then
+  if [[ -d "/work/training/FlexMoRE/models" ]]; then
+    BASE_MODEL_ROOT="/work/training/FlexMoRE/models"
+  else
+    BASE_MODEL_ROOT="${ROOT_DIR}/work/training/FlexMoRE/models"
+  fi
+fi
+
+if [[ -z "${RANKED_MODEL_ROOT:-}" ]]; then
+  if [[ -d "/work/training/FlexMoRE/eval_results/models" ]]; then
+    RANKED_MODEL_ROOT="/work/training/FlexMoRE/eval_results/models"
+  else
+    RANKED_MODEL_ROOT="${ROOT_DIR}/work/training/FlexMoRE/eval_results/models"
+  fi
+fi
+
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_models}"
 EVAL_ROOT="${EVAL_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_evals}"
 MERGE_DEVICE="${MERGE_DEVICE:-cpu}"
