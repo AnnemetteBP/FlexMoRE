@@ -69,6 +69,12 @@ A7_DIR="${ARTIFACT_ROOT}/FlexMoRE-v02-selected-a7"
 MERGE_INPUT_ROOT="${ARTIFACT_ROOT}/merge_input_views"
 
 CODE_BASE="${BASE_MODEL_ROOT}/Flex-code-2x7B-1T"
+CREATIVE_BASE="${BASE_MODEL_ROOT}/Flex-creative-2x7B-1T"
+MATH_BASE="${BASE_MODEL_ROOT}/Flex-math-2x7B-1T"
+NEWS_BASE="${BASE_MODEL_ROOT}/Flex-news-2x7B-1T"
+PES2O_BASE="${BASE_MODEL_ROOT}/Flex-pes2o-2x7B-1T"
+REDDIT_BASE="${BASE_MODEL_ROOT}/Flex-reddit-2x7B-1T"
+
 CODE_R16="${RANKED_MODEL_ROOT}/Flex-code-2x7B-1T-r16"
 CREATIVE_R32="${RANKED_MODEL_ROOT}/Flex-creative-2x7B-1T-r32"
 MATH_R64="${RANKED_MODEL_ROOT}/Flex-math-2x7B-1T-r64"
@@ -86,6 +92,11 @@ require_path() {
 
 require_all_inputs() {
   require_path "${CODE_BASE}"
+  require_path "${CREATIVE_BASE}"
+  require_path "${MATH_BASE}"
+  require_path "${NEWS_BASE}"
+  require_path "${PES2O_BASE}"
+  require_path "${REDDIT_BASE}"
   require_path "${CODE_R16}"
   require_path "${CREATIVE_R32}"
   require_path "${MATH_R64}"
@@ -120,9 +131,10 @@ prepare_model_view() {
   local dst_dir="$2"
   local default_model_type="$3"
   local default_architecture="$4"
+  local fallback_config_src="$5"
 
   mkdir -p "${dst_dir}"
-  python3 - "${src_dir}" "${dst_dir}" "${default_model_type}" "${default_architecture}" <<'PY'
+  python3 - "${src_dir}" "${dst_dir}" "${default_model_type}" "${default_architecture}" "${fallback_config_src}" <<'PY'
 import json
 import os
 import shutil
@@ -132,6 +144,7 @@ src = sys.argv[1]
 dst = sys.argv[2]
 default_model_type = sys.argv[3]
 default_architecture = sys.argv[4]
+fallback_config_src = sys.argv[5]
 
 os.makedirs(dst, exist_ok=True)
 for name in os.listdir(dst):
@@ -156,6 +169,23 @@ for name in os.listdir(src):
             f.write("\n")
     else:
         os.symlink(src_path, dst_path)
+
+dst_config = os.path.join(dst, "config.json")
+if not os.path.exists(dst_config):
+    fallback_config = os.path.join(fallback_config_src, "config.json")
+    if not os.path.exists(fallback_config):
+        raise FileNotFoundError(
+            f"Neither {os.path.join(src, 'config.json')} nor fallback {fallback_config} exists"
+        )
+    with open(fallback_config, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    if "model_type" not in config or not config["model_type"]:
+        config["model_type"] = default_model_type
+    if "architectures" not in config or not config["architectures"]:
+        config["architectures"] = [default_architecture]
+    with open(dst_config, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, sort_keys=True)
+        f.write("\n")
 PY
 }
 
@@ -200,13 +230,13 @@ build_merged_base() {
   local pes2o_r64_view="${MERGE_INPUT_ROOT}/Flex-pes2o-2x7B-1T-r64"
   local reddit_r32_view="${MERGE_INPUT_ROOT}/Flex-reddit-2x7B-1T-r32"
 
-  prepare_model_view "${CODE_BASE}" "${code_base_view}" "flex_olmo" "FlexOlmoForCausalLM"
-  prepare_model_view "${CODE_R16}" "${code_r16_view}" "flex_olmo" "FlexOlmoForCausalLM"
-  prepare_model_view "${CREATIVE_R32}" "${creative_r32_view}" "flex_olmo" "FlexOlmoForCausalLM"
-  prepare_model_view "${MATH_R64}" "${math_r64_view}" "flex_olmo" "FlexOlmoForCausalLM"
-  prepare_model_view "${NEWS_R16}" "${news_r16_view}" "flex_olmo" "FlexOlmoForCausalLM"
-  prepare_model_view "${PES2O_R64}" "${pes2o_r64_view}" "flex_olmo" "FlexOlmoForCausalLM"
-  prepare_model_view "${REDDIT_R32}" "${reddit_r32_view}" "flex_olmo" "FlexOlmoForCausalLM"
+  prepare_model_view "${CODE_BASE}" "${code_base_view}" "flex_olmo" "FlexOlmoForCausalLM" "${CODE_BASE}"
+  prepare_model_view "${CODE_R16}" "${code_r16_view}" "flex_olmo" "FlexOlmoForCausalLM" "${CODE_BASE}"
+  prepare_model_view "${CREATIVE_R32}" "${creative_r32_view}" "flex_olmo" "FlexOlmoForCausalLM" "${CREATIVE_BASE}"
+  prepare_model_view "${MATH_R64}" "${math_r64_view}" "flex_olmo" "FlexOlmoForCausalLM" "${MATH_BASE}"
+  prepare_model_view "${NEWS_R16}" "${news_r16_view}" "flex_olmo" "FlexOlmoForCausalLM" "${NEWS_BASE}"
+  prepare_model_view "${PES2O_R64}" "${pes2o_r64_view}" "flex_olmo" "FlexOlmoForCausalLM" "${PES2O_BASE}"
+  prepare_model_view "${REDDIT_R32}" "${reddit_r32_view}" "flex_olmo" "FlexOlmoForCausalLM" "${REDDIT_BASE}"
 
   echo "Merging selected ranked experts into ${MERGED_BASE}"
   PYTHONPATH=. python3 src/scripts/flexmore/merge_experts_to_flexolmo.py \
