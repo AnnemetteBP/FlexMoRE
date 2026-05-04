@@ -12,11 +12,19 @@ import typer
 MODEL_PATHS = {
     "Math": "/media/am/AM/FlexMoRE/src/scripts/analysis/results/singular_values/math_singular_values.pt",
     "News": "/media/am/AM/FlexMoRE/src/scripts/analysis/results/singular_values/news_singular_values.pt",
+    "Academic": "/media/am/AM/FlexMoRE/src/scripts/analysis/results/singular_values/academic_singular_values.pt",
+    "Reddit": "/media/am/AM/FlexMoRE/src/scripts/analysis/results/singular_values/reddit_singular_values.pt",
+    "Code": "/media/am/AM/FlexMoRE/src/scripts/analysis/results/singular_values/code_singular_values.pt",
+    "Creative": "/media/am/AM/FlexMoRE/src/scripts/analysis/results/singular_values/creative_singular_values.pt",
 }
 
 MODEL_COLORS = {
     "Math": "#1b9e77",
     "News": "#d95f02",
+    "Academic": "#7570b3",
+    "Reddit": "#e7298a",
+    "Code": "#66a61e",
+    "Creative": "#e6ab02",
 }
 
 MODULE_ORDER = ["all", "down_proj", "gate_proj", "up_proj"]
@@ -86,7 +94,7 @@ def summarize(df: pd.DataFrame) -> dict:
 def build_stats_table(df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for module in MODULE_ORDER:
-        for model in ("Math", "News"):
+        for model in MODEL_PATHS.keys():
             subset = df[df["model"] == model]
             if module != "all":
                 subset = subset[subset["module"] == module]
@@ -110,7 +118,7 @@ def plot_probability_histograms(df: pd.DataFrame, output_path: Path) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(12.5, 8.2), sharex=True, sharey=True, constrained_layout=True)
 
     for ax, module in zip(axes.flatten(), MODULE_ORDER):
-        for model in ("Math", "News"):
+        for model in MODEL_PATHS.keys():
             subset = df[df["model"] == model]
             if module != "all":
                 subset = subset[subset["module"] == module]
@@ -134,7 +142,7 @@ def plot_probability_histograms(df: pd.DataFrame, output_path: Path) -> None:
         ax.grid(True, alpha=0.2)
 
     axes[0, 0].legend(loc="upper left", frameon=True)
-    fig.suptitle("Math vs News Singular-Value Probability Distributions", fontsize=14)
+    fig.suptitle("Singular-Value Probability Distributions Across Experts", fontsize=14)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
@@ -155,7 +163,7 @@ def plot_probability_boxplots(df: pd.DataFrame, output_path: Path) -> None:
             data=subset,
             x="model",
             y="log10_probability",
-            order=["Math", "News"],
+            order=list(MODEL_PATHS.keys()),
             palette=MODEL_COLORS,
             ax=ax,
             fliersize=1.5,
@@ -165,7 +173,7 @@ def plot_probability_boxplots(df: pd.DataFrame, output_path: Path) -> None:
         ax.set_ylabel(r"$\log_{10}(p_i)$")
         ax.grid(True, axis="y", alpha=0.2)
 
-    fig.suptitle("Math vs News Probability Distribution Spread", fontsize=14)
+    fig.suptitle("Singular-Value Probability Distribution Spread Across Experts", fontsize=14)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
@@ -173,7 +181,7 @@ def plot_probability_boxplots(df: pd.DataFrame, output_path: Path) -> None:
 
 def main(
     output_dir: str = typer.Option(
-        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/probability_distribution_comparison",
+        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/probability_distribution_comparison_all_experts",
         help="Directory to write comparison outputs",
     ),
     font_size: int = typer.Option(10, help="Base plotting font size"),

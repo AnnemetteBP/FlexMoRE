@@ -10,6 +10,9 @@ EXPERTS = [
     ("Math", "math"),
     ("News", "news"),
     ("Academic", "academic"),
+    ("Reddit", "reddit"),
+    ("Code", "code"),
+    ("Creative", "creative"),
 ]
 
 
@@ -121,7 +124,7 @@ def correlation_table(df: pd.DataFrame) -> pd.DataFrame:
 
 def main(
     output_dir: str = typer.Option(
-        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/hybrid_rank_analysis",
+        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/hybrid_rank_analysis_all_experts",
         help="Directory to write joined tables",
     ),
 ):

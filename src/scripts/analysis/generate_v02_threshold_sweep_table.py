@@ -166,6 +166,10 @@ def main(
         "/media/am/AM/FlexMoRE/src/scripts/analysis/results/FlexMoRE_V02_tables",
         help="Directory for the threshold sweep artifacts",
     ),
+    output_stem: str = typer.Option(
+        "v02_threshold_sweep_all_experts",
+        help="Filename stem for the generated threshold sweep artifacts",
+    ),
     threshold: list[float] = typer.Option(
         DEFAULT_THRESHOLDS,
         help="Probability thresholds to sweep for the v02 method",
@@ -175,9 +179,9 @@ def main(
     output_root.mkdir(parents=True, exist_ok=True)
 
     rows = generate_rows(threshold)
-    write_json(rows, output_root / "v02_threshold_sweep_all_experts.json")
-    write_csv(rows, output_root / "v02_threshold_sweep_all_experts.csv")
-    write_latex(rows, output_root / "v02_threshold_sweep_all_experts.tex")
+    write_json(rows, output_root / f"{output_stem}.json")
+    write_csv(rows, output_root / f"{output_stem}.csv")
+    write_latex(rows, output_root / f"{output_stem}.tex")
 
 
 if __name__ == "__main__":

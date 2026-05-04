@@ -147,52 +147,51 @@ def collect_similarity_rows(slug: str, sv_map: dict[str, torch.Tensor]) -> list[
     return rows
 
 
-def generate_rows(thresholds: list[float]) -> list[dict]:
+def generate_rows_for_expert(expert_name: str, slug: str, thresholds: list[float]) -> list[dict]:
+    print(f"Loading {expert_name} ({slug})...", flush=True)
+    sv_map = load_singular_values_map(slug)
+    similarity_rows = collect_similarity_rows(slug, sv_map)
+    sim_by_key = {row["model_key"]: row for row in similarity_rows}
+    cosine_distance_values = [1.0 - row["public_expert_cosine"] for row in similarity_rows]
+    relative_delta_values = [row["relative_delta_norm"] for row in similarity_rows]
+    cosine_min, cosine_max = min(cosine_distance_values), max(cosine_distance_values)
+    delta_min, delta_max = min(relative_delta_values), max(relative_delta_values)
+
     rows = []
-    for expert_name, slug in EXPERTS:
-        print(f"Loading {expert_name} ({slug})...", flush=True)
-        sv_map = load_singular_values_map(slug)
-        similarity_rows = collect_similarity_rows(slug, sv_map)
-        sim_by_key = {row["model_key"]: row for row in similarity_rows}
-        cosine_distance_values = [1.0 - row["public_expert_cosine"] for row in similarity_rows]
-        relative_delta_values = [row["relative_delta_norm"] for row in similarity_rows]
-        cosine_min, cosine_max = min(cosine_distance_values), max(cosine_distance_values)
-        delta_min, delta_max = min(relative_delta_values), max(relative_delta_values)
+    for threshold in thresholds:
+        weighted_ranks = []
+        raw_ranks = []
+        kept_counts = []
+        for model_key in sorted(sv_map.keys(), key=model_key_sort_key):
+            base_rank, kept_count = compute_probability_rank(sv_map[model_key], threshold)
+            sim_row = sim_by_key[model_key]
+            module_weight = MODULE_WEIGHTS[sim_row["module"]]
+            layer_weight = compute_layer_weight(sim_row["layer"], num_layers=32)
+            cosine_score = normalize_feature(1.0 - sim_row["public_expert_cosine"], cosine_min, cosine_max)
+            delta_score = normalize_feature(sim_row["relative_delta_norm"], delta_min, delta_max)
+            similarity_weight = 0.75 + 0.25 * cosine_score + 0.25 * delta_score
+            weighted_rank = max(1, math.ceil(base_rank * module_weight * layer_weight * similarity_weight))
+            weighted_ranks.append(weighted_rank)
+            raw_ranks.append(base_rank)
+            kept_counts.append(kept_count)
 
-        for threshold in thresholds:
-            weighted_ranks = []
-            raw_ranks = []
-            kept_counts = []
-            for model_key in sorted(sv_map.keys(), key=model_key_sort_key):
-                base_rank, kept_count = compute_probability_rank(sv_map[model_key], threshold)
-                sim_row = sim_by_key[model_key]
-                module_weight = MODULE_WEIGHTS[sim_row["module"]]
-                layer_weight = compute_layer_weight(sim_row["layer"], num_layers=32)
-                cosine_score = normalize_feature(1.0 - sim_row["public_expert_cosine"], cosine_min, cosine_max)
-                delta_score = normalize_feature(sim_row["relative_delta_norm"], delta_min, delta_max)
-                similarity_weight = 0.75 + 0.25 * cosine_score + 0.25 * delta_score
-                weighted_rank = max(1, math.ceil(base_rank * module_weight * layer_weight * similarity_weight))
-                weighted_ranks.append(weighted_rank)
-                raw_ranks.append(base_rank)
-                kept_counts.append(kept_count)
-
-            rows.append(
-                {
-                    "threshold": threshold,
-                    "threshold_label": threshold_label(threshold),
-                    "expert": expert_name,
-                    "slug": slug,
-                    "num_targets": len(weighted_ranks),
-                    "min_rank": min(weighted_ranks),
-                    "mean_rank": sum(weighted_ranks) / len(weighted_ranks),
-                    "max_rank": max(weighted_ranks),
-                    "median_rank": sorted(weighted_ranks)[len(weighted_ranks) // 2],
-                    "mean_significant_probabilities": sum(kept_counts) / len(kept_counts),
-                    "selected_rank": next_power_of_two(max(weighted_ranks)),
-                    "base_max_rank_v02": max(raw_ranks),
-                }
-            )
-        print(f"Finished {expert_name} ({slug})", flush=True)
+        rows.append(
+            {
+                "threshold": threshold,
+                "threshold_label": threshold_label(threshold),
+                "expert": expert_name,
+                "slug": slug,
+                "num_targets": len(weighted_ranks),
+                "min_rank": min(weighted_ranks),
+                "mean_rank": sum(weighted_ranks) / len(weighted_ranks),
+                "max_rank": max(weighted_ranks),
+                "median_rank": sorted(weighted_ranks)[len(weighted_ranks) // 2],
+                "mean_significant_probabilities": sum(kept_counts) / len(kept_counts),
+                "selected_rank": next_power_of_two(max(weighted_ranks)),
+                "base_max_rank_v02": max(raw_ranks),
+            }
+        )
+    print(f"Finished {expert_name} ({slug})", flush=True)
     return rows
 
 
@@ -200,7 +199,7 @@ def write_json(rows: list[dict], output_path: Path) -> None:
     payload = {
         "method": "v02v03_probability_threshold_weighted_similarity",
         "thresholds": sorted({row["threshold"] for row in rows}),
-        "experts": [expert_name for expert_name, _, _ in EXPERTS],
+        "experts": [expert_name for expert_name, _ in EXPERTS],
         "rows": rows,
     }
     output_path.write_text(json.dumps(payload, indent=2))
@@ -254,6 +253,12 @@ def write_latex(rows: list[dict], output_path: Path) -> None:
     output_path.write_text("\n".join(lines) + "\n")
 
 
+def write_all_outputs(rows: list[dict], output_root: Path, stem: str) -> None:
+    write_json(rows, output_root / f"{stem}.json")
+    write_csv(rows, output_root / f"{stem}.csv")
+    write_latex(rows, output_root / f"{stem}.tex")
+
+
 def main(
     output_dir: str = typer.Option(
         "/media/am/AM/FlexMoRE/src/scripts/analysis/results/FlexMoRE_V02_tables",
@@ -267,10 +272,15 @@ def main(
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
-    rows = generate_rows(threshold)
-    write_json(rows, output_root / "v02v03_threshold_sweep_all_experts.json")
-    write_csv(rows, output_root / "v02v03_threshold_sweep_all_experts.csv")
-    write_latex(rows, output_root / "v02v03_threshold_sweep_all_experts.tex")
+    rows: list[dict] = []
+    combined_stem = "v02v03_threshold_sweep_all_experts"
+
+    for expert_name, slug in EXPERTS:
+        expert_rows = generate_rows_for_expert(expert_name, slug, threshold)
+        rows.extend(expert_rows)
+        write_all_outputs(expert_rows, output_root, f"v02v03_threshold_sweep_{slug}")
+        write_all_outputs(rows, output_root, combined_stem)
+        print(f"Checkpointed per-expert and combined tables after {expert_name} ({slug})", flush=True)
 
 
 if __name__ == "__main__":

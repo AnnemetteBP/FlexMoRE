@@ -7,11 +7,14 @@ import seaborn as sns
 import typer
 
 
-EXPERT_ORDER = ["Math", "News", "Academic"]
+EXPERT_ORDER = ["Math", "News", "Academic", "Reddit", "Code", "Creative"]
 EXPERT_COLORS = {
     "Math": "#1b9e77",
     "News": "#d95f02",
     "Academic": "#7570b3",
+    "Reddit": "#e7298a",
+    "Code": "#66a61e",
+    "Creative": "#e6ab02",
 }
 MODULE_ORDER = ["down_proj", "gate_proj", "up_proj"]
 MODULE_COLORS = {
@@ -234,7 +237,7 @@ def plot_expert_subplots(reports: list[dict], metric_name: str, meta: dict, outp
     figures_dir = output_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(1, len(reports), figsize=(15, 4.8), sharex=True, sharey=True, constrained_layout=True)
+    fig, axes = plt.subplots(1, len(reports), figsize=(max(15, 3.8 * len(reports)), 4.8), sharex=True, sharey=True, constrained_layout=True)
     if len(reports) == 1:
         axes = [axes]
 
@@ -311,7 +314,7 @@ def main(
         help="Directory containing per-expert MLP metrics JSON files",
     ),
     output_dir: str = typer.Option(
-        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/similarity_metrics_report_preview",
+        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/similarity_metrics_report_all_experts",
         help="Directory to write figures and tables",
     ),
     font_size: int = typer.Option(10, help="Base plotting font size"),

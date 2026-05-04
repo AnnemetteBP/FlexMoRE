@@ -1,12 +1,19 @@
 import json
+import os
 import random
+import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 import typer
-from transformers import AutoTokenizer, FlexOlmoForCausalLM
+from transformers import AutoTokenizer
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 
 TASK_GROUPS = {
@@ -212,6 +219,39 @@ def build_hooks(model: torch.nn.Module, stats_by_module: dict[str, ChannelStats]
     return handles
 
 
+def prepare_olmoe_compat_dir(model_path: str) -> str:
+    src = Path(model_path)
+    config_path = src / "config.json"
+    config = json.load(config_path.open("r"))
+    if config.get("model_type") != "flex_olmo":
+        return model_path
+
+    compat_root = Path(tempfile.mkdtemp(prefix="flex_olmo_compat_", dir="/tmp"))
+    for name in [
+        "generation_config.json",
+        "model.safetensors.index.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "merges.txt",
+        "vocab.json",
+    ]:
+        src_file = src / name
+        if src_file.exists():
+            os.symlink(src_file, compat_root / name)
+
+    for shard_file in src.glob("*.safetensors"):
+        os.symlink(shard_file, compat_root / shard_file.name)
+
+    compat_config = dict(config)
+    compat_config["model_type"] = "olmoe"
+    compat_config["architectures"] = ["OlmoeForCausalLM"]
+    with (compat_root / "config.json").open("w") as f:
+        json.dump(compat_config, f)
+
+    return str(compat_root)
+
+
 def main(
     model_path: str = typer.Argument(..., help="Path to the checkpoint to analyze"),
     output_path: str = typer.Option(
@@ -242,11 +282,14 @@ def main(
     if not samples:
         raise ValueError("No usable samples were found")
 
+    from transformers import OlmoeForCausalLM
+
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = FlexOlmoForCausalLM.from_pretrained(model_path)
+    resolved_model_path = prepare_olmoe_compat_dir(model_path)
+    model = OlmoeForCausalLM.from_pretrained(resolved_model_path)
     model.eval()
 
     stats_by_module: dict[str, ChannelStats] = {}

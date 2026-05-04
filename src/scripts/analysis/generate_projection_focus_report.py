@@ -7,11 +7,14 @@ import seaborn as sns
 import typer
 
 
-EXPERT_ORDER = ["Math", "News", "Academic"]
+EXPERT_ORDER = ["Math", "News", "Academic", "Reddit", "Code", "Creative"]
 EXPERT_COLORS = {
     "Math": "#1b9e77",
     "News": "#d95f02",
     "Academic": "#7570b3",
+    "Reddit": "#e7298a",
+    "Code": "#66a61e",
+    "Creative": "#e6ab02",
 }
 MODULE_ORDER = ["down_proj", "gate_proj", "up_proj"]
 MODULE_TITLES = {
@@ -134,7 +137,7 @@ def main(
         help="Directory containing per-expert MLP metrics JSON files",
     ),
     output_dir: str = typer.Option(
-        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/projection_focus_report_preview",
+        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/projection_focus_report_all_experts",
         help="Directory to write figures",
     ),
     font_size: int = typer.Option(10, help="Base plotting font size"),

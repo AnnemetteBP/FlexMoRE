@@ -7,11 +7,14 @@ import seaborn as sns
 import typer
 
 
-EXPERT_ORDER = ["Math", "News", "Academic"]
+EXPERT_ORDER = ["Math", "News", "Academic", "Reddit", "Code", "Creative"]
 EXPERT_COLORS = {
     "Math": "#1b9e77",
     "News": "#d95f02",
     "Academic": "#7570b3",
+    "Reddit": "#e7298a",
+    "Code": "#66a61e",
+    "Creative": "#e6ab02",
 }
 MODULE_ORDER = ["down_proj", "gate_proj", "up_proj"]
 MODULE_TITLES = {
@@ -117,11 +120,11 @@ def plot_projection_focus(df: pd.DataFrame, metric_name: str, meta: dict, output
 
 def main(
     input_path: str = typer.Option(
-        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/hybrid_rank_analysis/hybrid_rank_analysis_rows.csv",
+        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/hybrid_rank_analysis_all_experts/hybrid_rank_analysis_rows.csv",
         help="Joined hybrid rank analysis rows CSV or JSON",
     ),
     output_dir: str = typer.Option(
-        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/svd_projection_focus_report_preview",
+        "/media/am/AM/FlexMoRE/src/scripts/analysis/results/svd_projection_focus_report_all_experts",
         help="Directory to write figures",
     ),
     font_size: int = typer.Option(10, help="Base plotting font size"),
