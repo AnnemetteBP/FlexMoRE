@@ -32,6 +32,17 @@
     "Flex-danish-2x7B-55B-v2",
     "Flex-danish-2x7B-55B-v2-bf16"
   ],
+  "effective_ranks": [
+    "Flex-code-2x7B-1T-r16",
+    "Flex-creative-2x7B-1T-r32",
+    "Flex-math-2x7B-1T-r64",
+    "Flex-news-2x7B-1T-r16",
+    "Flex-pes2o-2x7B-1T-r64",
+    "Flex-public-2x7B-1T",
+    "Flex-public-2x7B-1T-v1",
+    "Flex-public-7B-1T",
+    "Flex-reddit-2x7B-1T-r32"
+  ],
   "flexolmo": {
     "7x7B": {
       "a2": [
