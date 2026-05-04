@@ -2,14 +2,13 @@ from collections import defaultdict
 import json
 import logging
 import torch
-from transformers import (
-    AutoConfig,
-    AutoModelForCausalLM,
-    FlexMoREConfig,
-    FlexMoREForCausalLM,
-    FlexOlmoConfig,
-    FlexOlmoForCausalLM,
-)
+from transformers import AutoConfig, AutoModelForCausalLM
+try:
+    from transformers import FlexMoREConfig, FlexMoREForCausalLM
+except ImportError:
+    FlexMoREConfig = None
+    FlexMoREForCausalLM = None
+from transformers import FlexOlmoConfig, FlexOlmoForCausalLM
 import typer
 
 from olmo_core.utils import prepare_cli_environment
@@ -32,7 +31,7 @@ def load_config(path: str):
     config_path = f"{path}/config.json"
     config_dict = json.load(open(config_path, "r"))
     model_type = config_dict.get("model_type")
-    if model_type == "flexmore":
+    if model_type == "flexmore" and FlexMoREConfig is not None:
         return FlexMoREConfig.from_dict(config_dict)
     if model_type in {"flex_olmo", "olmoe"}:
         return FlexOlmoConfig.from_dict(config_dict)
@@ -43,7 +42,7 @@ def load_model(path: str, dtype):
     config_path = f"{path}/config.json"
     config_dict = json.load(open(config_path, "r"))
     model_type = config_dict.get("model_type")
-    if model_type == "flexmore":
+    if model_type == "flexmore" and FlexMoREForCausalLM is not None:
         return FlexMoREForCausalLM.from_pretrained(path, dtype=dtype)
     if model_type in {"flex_olmo", "olmoe"}:
         return FlexOlmoForCausalLM.from_pretrained(path, dtype=dtype)
@@ -68,7 +67,7 @@ def main(
     with torch.device(device):
         if isinstance(model_config, FlexOlmoConfig):
             model = FlexOlmoForCausalLM(config=model_config)
-        elif isinstance(model_config, FlexMoREConfig):
+        elif FlexMoREConfig is not None and isinstance(model_config, FlexMoREConfig):
             model = FlexMoREForCausalLM(config=model_config)
         else:
             model = AutoModelForCausalLM.from_config(model_config)
