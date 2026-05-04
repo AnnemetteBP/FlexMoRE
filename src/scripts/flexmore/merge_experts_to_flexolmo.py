@@ -2,7 +2,14 @@ from collections import defaultdict
 import json
 import logging
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    FlexMoREConfig,
+    FlexMoREForCausalLM,
+    FlexOlmoConfig,
+    FlexOlmoForCausalLM,
+)
 import typer
 
 from olmo_core.utils import prepare_cli_environment
@@ -20,6 +27,28 @@ def dtype_from_string(s):
         case _:
             raise ValueError(f"Unsupported dtype string: {s}")
 
+
+def load_config(path: str):
+    config_path = f"{path}/config.json"
+    config_dict = json.load(open(config_path, "r"))
+    model_type = config_dict.get("model_type")
+    if model_type == "flexmore":
+        return FlexMoREConfig.from_dict(config_dict)
+    if model_type in {"flex_olmo", "olmoe"}:
+        return FlexOlmoConfig.from_dict(config_dict)
+    return AutoConfig.from_pretrained(path)
+
+
+def load_model(path: str, dtype):
+    config_path = f"{path}/config.json"
+    config_dict = json.load(open(config_path, "r"))
+    model_type = config_dict.get("model_type")
+    if model_type == "flexmore":
+        return FlexMoREForCausalLM.from_pretrained(path, dtype=dtype)
+    if model_type in {"flex_olmo", "olmoe"}:
+        return FlexOlmoForCausalLM.from_pretrained(path, dtype=dtype)
+    return AutoModelForCausalLM.from_pretrained(path, dtype=dtype)
+
 def main(
     target: str = typer.Argument(..., help="Target path to save the merged model"),
     models: list[str] = typer.Argument(..., help="List of expert model paths to merge"),
@@ -32,12 +61,17 @@ def main(
     device = torch.device(device)
     dtype = dtype_from_string(dtype)
     log.info(f"Building model config from {expert_paths[0]} with {len(expert_paths)} experts")
-    model_config = AutoConfig.from_pretrained(expert_paths[0])
+    model_config = load_config(expert_paths[0])
     model_config.num_experts = len(expert_paths)
     model_config.dtype = dtype
     log.info(f"Building the MoE model on {device} with dtype {dtype}")
     with torch.device(device):
-        model = AutoModelForCausalLM.from_config(model_config)
+        if isinstance(model_config, FlexOlmoConfig):
+            model = FlexOlmoForCausalLM(config=model_config)
+        elif isinstance(model_config, FlexMoREConfig):
+            model = FlexMoREForCausalLM(config=model_config)
+        else:
+            model = AutoModelForCausalLM.from_config(model_config)
     log.info(f"Model loaded on {device} with dtype {dtype}")
     log.info(model)
     moe_state_dict = model.state_dict()
@@ -45,7 +79,7 @@ def main(
     for expert, path in enumerate(expert_paths):
         log.info(f"Loading model from {path} as expert {expert} on {device} with dtype {dtype}")
         with torch.device(device):
-            expert_model = AutoModelForCausalLM.from_pretrained(path, dtype=dtype)
+            expert_model = load_model(path, dtype=dtype)
         log.info(expert_model)
         assert expert_model.config.num_experts == 2, f"Expert model at {path} has num_experts={expert_model.config.num_experts}, expected 2"
         expert_state_dict = expert_model.state_dict()
