@@ -1,8 +1,8 @@
+import argparse
 from collections import defaultdict
 import logging
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
-import typer
 
 try:
     from olmo_core.utils import prepare_cli_environment
@@ -38,17 +38,22 @@ def load_model(path: str, dtype):
             path, dtype=dtype, trust_remote_code=True
         )
 
-def main(
-    target: str = typer.Argument(..., help="Target path to save the merged model"),
-    models: list[str] = typer.Argument(..., help="List of expert model paths to merge"),
-    device: str = typer.Option("cpu", help="Device to load the models on"),
-    dtype: str = typer.Option("bfloat16", help="Data type to load the models with"),
-):
+def parse_args():
+    parser = argparse.ArgumentParser(description="Merge ranked 2x7B experts into one FlexOlmo-style MoE model")
+    parser.add_argument("target", help="Target path to save the merged model")
+    parser.add_argument("models", nargs="+", help="List of expert model paths to merge")
+    parser.add_argument("--device", default="cpu", help="Device to load the models on")
+    parser.add_argument("--dtype", default="bfloat16", help="Data type to load the models with")
+    return parser.parse_args()
+
+
+def main():
     prepare_cli_environment()
-    expert_paths = models
-    target_path = target
-    device = torch.device(device)
-    dtype = dtype_from_string(dtype)
+    args = parse_args()
+    expert_paths = args.models
+    target_path = args.target
+    device = torch.device(args.device)
+    dtype = dtype_from_string(args.dtype)
     log.info(f"Building model config from {expert_paths[0]} with {len(expert_paths)} experts")
     model_config = load_config(expert_paths[0])
     model_config.num_experts = len(expert_paths)
@@ -115,4 +120,4 @@ def main(
     log.info(f"Model saved to {target_path}")
 
 if __name__ == "__main__":
-    typer.run(main)
+    main()
