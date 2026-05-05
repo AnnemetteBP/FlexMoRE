@@ -66,10 +66,14 @@ fi
 
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_models}"
 EVAL_ROOT="${EVAL_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_evals}"
-MERGE_DEVICE="${MERGE_DEVICE:-cpu}"
-MERGE_DTYPE="${MERGE_DTYPE:-bfloat16}"
+MERGE_DEVICE="${MERGE_DEVICE:-}"
+MERGE_DTYPE="${MERGE_DTYPE:-}"
 GPUS="${GPUS:-1}"
 LIMIT="${LIMIT:-1000}"
+MERGE_PYTHON="${MERGE_PYTHON:-python3}"
+MERGE_CONDA_ENV="${MERGE_CONDA_ENV:-}"
+EVAL_PYTHON="${EVAL_PYTHON:-python3}"
+EVAL_CONDA_ENV="${EVAL_CONDA_ENV:-}"
 
 TASK_GROUPS=(
   mc9
@@ -259,17 +263,29 @@ build_merged_base() {
   prepare_model_view "${REDDIT_R32}" "${reddit_r32_view}" "flex_olmo" "FlexOlmoForCausalLM" "${REDDIT_BASE}"
 
   echo "Merging selected ranked experts into ${MERGED_BASE}"
-  PYTHONPATH=. python3 src/scripts/flexmore/merge_experts_to_flexolmo.py \
-    "${MERGED_BASE}" \
-    "${code_base_view}" \
-    "${code_r16_view}" \
-    "${creative_r32_view}" \
-    "${math_r64_view}" \
-    "${news_r16_view}" \
-    "${pes2o_r64_view}" \
-    "${reddit_r32_view}" \
-    --device "${MERGE_DEVICE}" \
-    --dtype "${MERGE_DTYPE}"
+  local merge_args=(
+    "${MERGED_BASE}"
+    "${code_base_view}"
+    "${code_r16_view}"
+    "${creative_r32_view}"
+    "${math_r64_view}"
+    "${news_r16_view}"
+    "${pes2o_r64_view}"
+    "${reddit_r32_view}"
+  )
+  if [[ -n "${MERGE_DEVICE}" ]]; then
+    merge_args+=(--device "${MERGE_DEVICE}")
+  fi
+  if [[ -n "${MERGE_DTYPE}" ]]; then
+    merge_args+=(--dtype "${MERGE_DTYPE}")
+  fi
+  if [[ -n "${MERGE_CONDA_ENV}" ]]; then
+    PYTHONPATH=. conda run -n "${MERGE_CONDA_ENV}" python src/scripts/flexmore/merge_experts_to_flexolmo.py \
+      "${merge_args[@]}"
+  else
+    PYTHONPATH=. "${MERGE_PYTHON}" src/scripts/flexmore/merge_experts_to_flexolmo.py \
+      "${merge_args[@]}"
+  fi
 }
 
 tasks_for_group() {
@@ -358,14 +374,25 @@ launch_group() {
     [[ -z "${task}" ]] && continue
     local batch_size
     batch_size="$(batch_size_for_task "${task}")"
-    PYTHONPATH=. python3 src/scripts/eval/launch_eval.py \
-      --model "${model_path}" \
-      --model-type hf \
-      --task "${task}" \
-      --limit "${LIMIT}" \
-      --output-dir "${output_dir}" \
-      --batch-size "${batch_size}" \
-      --gpus "${GPUS}"
+    if [[ -n "${EVAL_CONDA_ENV}" ]]; then
+      PYTHONPATH=. conda run -n "${EVAL_CONDA_ENV}" python src/scripts/eval/launch_eval.py \
+        --model "${model_path}" \
+        --model-type hf \
+        --task "${task}" \
+        --limit "${LIMIT}" \
+        --output-dir "${output_dir}" \
+        --batch-size "${batch_size}" \
+        --gpus "${GPUS}"
+    else
+      PYTHONPATH=. "${EVAL_PYTHON}" src/scripts/eval/launch_eval.py \
+        --model "${model_path}" \
+        --model-type hf \
+        --task "${task}" \
+        --limit "${LIMIT}" \
+        --output-dir "${output_dir}" \
+        --batch-size "${batch_size}" \
+        --gpus "${GPUS}"
+    fi
   done < <(tasks_for_group "${group}")
 }
 
