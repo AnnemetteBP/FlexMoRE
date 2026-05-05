@@ -1,14 +1,7 @@
 from collections import defaultdict
-import json
 import logging
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
-try:
-    from transformers import FlexMoREConfig, FlexMoREForCausalLM
-except ImportError:
-    FlexMoREConfig = None
-    FlexMoREForCausalLM = None
-from transformers import FlexOlmoConfig, FlexOlmoForCausalLM
 import typer
 
 from olmo_core.utils import prepare_cli_environment
@@ -26,27 +19,20 @@ def dtype_from_string(s):
         case _:
             raise ValueError(f"Unsupported dtype string: {s}")
 
-
 def load_config(path: str):
-    config_path = f"{path}/config.json"
-    config_dict = json.load(open(config_path, "r"))
-    model_type = config_dict.get("model_type")
-    if model_type == "flexmore" and FlexMoREConfig is not None:
-        return FlexMoREConfig.from_dict(config_dict)
-    if model_type in {"flex_olmo", "olmoe"}:
-        return FlexOlmoConfig.from_dict(config_dict)
-    return AutoConfig.from_pretrained(path)
+    return AutoConfig.from_pretrained(path, trust_remote_code=True)
 
 
 def load_model(path: str, dtype):
-    config_path = f"{path}/config.json"
-    config_dict = json.load(open(config_path, "r"))
-    model_type = config_dict.get("model_type")
-    if model_type == "flexmore" and FlexMoREForCausalLM is not None:
-        return FlexMoREForCausalLM.from_pretrained(path, dtype=dtype)
-    if model_type in {"flex_olmo", "olmoe"}:
-        return FlexOlmoForCausalLM.from_pretrained(path, dtype=dtype)
-    return AutoModelForCausalLM.from_pretrained(path, dtype=dtype)
+    # Different internal transformers forks accept either `torch_dtype` or `dtype`.
+    try:
+        return AutoModelForCausalLM.from_pretrained(
+            path, torch_dtype=dtype, trust_remote_code=True
+        )
+    except TypeError:
+        return AutoModelForCausalLM.from_pretrained(
+            path, dtype=dtype, trust_remote_code=True
+        )
 
 def main(
     target: str = typer.Argument(..., help="Target path to save the merged model"),
@@ -62,15 +48,12 @@ def main(
     log.info(f"Building model config from {expert_paths[0]} with {len(expert_paths)} experts")
     model_config = load_config(expert_paths[0])
     model_config.num_experts = len(expert_paths)
-    model_config.dtype = dtype
+    if hasattr(model_config, "dtype"):
+        model_config.dtype = str(dtype).replace("torch.", "")
+    setattr(model_config, "torch_dtype", dtype)
     log.info(f"Building the MoE model on {device} with dtype {dtype}")
     with torch.device(device):
-        if isinstance(model_config, FlexOlmoConfig):
-            model = FlexOlmoForCausalLM(config=model_config)
-        elif FlexMoREConfig is not None and isinstance(model_config, FlexMoREConfig):
-            model = FlexMoREForCausalLM(config=model_config)
-        else:
-            model = AutoModelForCausalLM.from_config(model_config)
+        model = AutoModelForCausalLM.from_config(model_config, trust_remote_code=True)
     log.info(f"Model loaded on {device} with dtype {dtype}")
     log.info(model)
     moe_state_dict = model.state_dict()
