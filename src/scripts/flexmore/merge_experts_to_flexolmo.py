@@ -4,7 +4,11 @@ import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 import typer
 
-from olmo_core.utils import prepare_cli_environment
+try:
+    from olmo_core.utils import prepare_cli_environment
+except ImportError:
+    def prepare_cli_environment(*args, **kwargs):
+        return None
 
 log = logging.getLogger(__name__)
 
