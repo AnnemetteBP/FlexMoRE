@@ -44,6 +44,12 @@ if [[ -z "${RANKED_MODEL_ROOT:-}" ]]; then
   fi
 fi
 
+# Some UCloud setups keep the ranked -r* checkpoints directly in the same
+# models root as the base 2x7B checkpoints instead of eval_results/models.
+if [[ ! -d "${RANKED_MODEL_ROOT}/Flex-code-2x7B-1T-r16" && -d "${BASE_MODEL_ROOT}/Flex-code-2x7B-1T-r16" ]]; then
+  RANKED_MODEL_ROOT="${BASE_MODEL_ROOT}"
+fi
+
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_models}"
 EVAL_ROOT="${EVAL_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_evals}"
 MERGE_DEVICE="${MERGE_DEVICE:-cpu}"
