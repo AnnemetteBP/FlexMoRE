@@ -44,9 +44,23 @@ if [[ -z "${RANKED_MODEL_ROOT:-}" ]]; then
   fi
 fi
 
-# Some UCloud setups keep the ranked -r* checkpoints directly in the same
-# models root as the base 2x7B checkpoints instead of eval_results/models.
-if [[ ! -d "${RANKED_MODEL_ROOT}/Flex-code-2x7B-1T-r16" && -d "${BASE_MODEL_ROOT}/Flex-code-2x7B-1T-r16" ]]; then
+looks_like_hf_checkpoint_dir() {
+  local dir="$1"
+  [[ -f "${dir}/config.json" ]] || return 1
+  [[ -f "${dir}/model.safetensors" ]] && return 0
+  [[ -f "${dir}/model.safetensors.index.json" ]] && return 0
+  compgen -G "${dir}/model-*.safetensors" > /dev/null && return 0
+  [[ -f "${dir}/pytorch_model.bin" ]] && return 0
+  [[ -f "${dir}/pytorch_model.bin.index.json" ]] && return 0
+  return 1
+}
+
+# Some UCloud setups keep ranked -r* checkpoints directly in the same models
+# root as the base 2x7B checkpoints, while eval_results/models may contain
+# task outputs with the same directory names. Prefer whichever location looks
+# like a real HF checkpoint, not whichever merely exists.
+if ! looks_like_hf_checkpoint_dir "${RANKED_MODEL_ROOT}/Flex-code-2x7B-1T-r16" \
+  && looks_like_hf_checkpoint_dir "${BASE_MODEL_ROOT}/Flex-code-2x7B-1T-r16"; then
   RANKED_MODEL_ROOT="${BASE_MODEL_ROOT}"
 fi
 
