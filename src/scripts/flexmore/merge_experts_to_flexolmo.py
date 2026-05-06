@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 import tempfile
+
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 
@@ -14,8 +15,9 @@ except ImportError:
     def prepare_cli_environment(*args, **kwargs):
         return None
 
+
 log = logging.getLogger(__name__)
-_TEMP_COMPAT_DIRS: list[str] = []
+
 
 def dtype_from_string(s):
     match s.lower():
@@ -41,8 +43,6 @@ def prepare_olmoe_compat_dir(model_path: str) -> str:
         return model_path
 
     compat_root = Path(tempfile.mkdtemp(prefix="flex_olmo_compat_", dir="/tmp"))
-    _TEMP_COMPAT_DIRS.append(str(compat_root))
-
     for name in src.iterdir():
         if name.name == "config.json":
             continue
@@ -64,14 +64,17 @@ def load_config(path: str):
 
 def load_model(path: str, dtype):
     compat_path = prepare_olmoe_compat_dir(path)
-    # Different internal transformers forks accept either `torch_dtype` or `dtype`.
     try:
         return AutoModelForCausalLM.from_pretrained(
-            compat_path, torch_dtype=dtype, trust_remote_code=True
+            compat_path,
+            torch_dtype=dtype,
+            trust_remote_code=True,
         )
     except TypeError:
         return AutoModelForCausalLM.from_pretrained(
-            compat_path, dtype=dtype, trust_remote_code=True
+            compat_path,
+            dtype=dtype,
+            trust_remote_code=True,
         )
 
 
@@ -198,6 +201,7 @@ def copy_packed_expert_tensors(
 
     return processed_keys
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Merge ranked 2x7B experts into one FlexOlmo-style MoE model")
     parser.add_argument("target", help="Target path to save the merged model")
@@ -227,16 +231,19 @@ def main():
     log.info(model)
     moe_state_dict = model.state_dict()
     filled_keys = defaultdict(int)
+
     for expert, path in enumerate(expert_paths):
         log.info(f"Loading model from {path} as expert {expert} on {device} with dtype {dtype}")
         with torch.device(device):
             expert_model = load_model(path, dtype=dtype)
         log.info(expert_model)
-        assert expert_model.config.num_experts == 2, f"Expert model at {path} has num_experts={expert_model.config.num_experts}, expected 2"
+        assert expert_model.config.num_experts == 2, (
+            f"Expert model at {path} has num_experts={expert_model.config.num_experts}, expected 2"
+        )
         expert_state_dict = expert_model.state_dict()
         log.info(f"Expert {expert} model loaded")
-        for expert_key in list(expert_state_dict.keys()):
-            weights = expert_state_dict[expert_key]
+
+        for expert_key, weights in expert_state_dict.items():
             if ".experts." in expert_key and (
                 ".experts.gate_up_proj" in expert_key or ".experts.down_proj" in expert_key
             ):
@@ -255,13 +262,13 @@ def main():
             moe_key = expert_key
             if ".experts.0." in expert_key:
                 if expert:
-                    if not torch.equal(moe_state_dict[moe_key], expert_state_dict[expert_key]):
+                    if not torch.equal(moe_state_dict[moe_key], weights):
                         raise_shared_key_mismatch(
                             expert,
                             path,
                             moe_key,
                             moe_state_dict[moe_key],
-                            expert_state_dict[expert_key],
+                            weights,
                         )
                     moe_key = None
             elif ".experts.1." in expert_key:
@@ -270,41 +277,52 @@ def main():
                 else:
                     moe_key = None
             elif ".mlp.gate." in expert_key:
-                # this is a 4096 in_features and num_experts out_features weight
                 if expert:
-                    assert torch.equal(
-                        moe_state_dict[moe_key][:1, :],
-                        expert_state_dict[expert_key][:1, :],
-                    ), f"Gate weights for expert 0 are different for expert and MoE model: {moe_key}"
-                    moe_state_dict[moe_key][expert:expert+1, :] = expert_state_dict[expert_key][1:2, :]
+                    if not torch.equal(moe_state_dict[moe_key][:1, :], weights[:1, :]):
+                        raise AssertionError(
+                            f"Gate weights for expert 0 are different for expert and MoE model: {moe_key}"
+                        )
+                    moe_state_dict[moe_key][expert:expert + 1, :] = weights[1:2, :]
                 else:
-                    moe_state_dict[moe_key][:1, :] = expert_state_dict[expert_key][:1, :]
+                    moe_state_dict[moe_key][:1, :] = weights[:1, :]
                 filled_keys[moe_key] += 1
                 moe_key = None
             elif expert:
-                if not torch.equal(moe_state_dict[moe_key], expert_state_dict[expert_key]):
+                if not torch.equal(moe_state_dict[moe_key], weights):
                     raise_shared_key_mismatch(
                         expert,
                         path,
                         moe_key,
                         moe_state_dict[moe_key],
-                        expert_state_dict[expert_key],
+                        weights,
                     )
                 moe_key = None
+
             if moe_key:
-                moe_state_dict[moe_key] = expert_state_dict[expert_key]
+                moe_state_dict[moe_key] = weights
                 filled_keys[moe_key] += 1
                 log.info(f"Key {expert_key} copied from expert {expert} to MoE model key {moe_key}")
             else:
                 log.info(f"Key {expert_key} has not been copied from expert {expert}")
+
         del expert_state_dict
-    assert set(moe_state_dict.keys()) == set(filled_keys.keys()), f"Not all keys have been filled: missing {set(moe_state_dict.keys()) - set(filled_keys.keys())}"
-    assert all(count == 1 for key, count in filled_keys.items() if ".mlp.gate." not in key), f"Some non-gate keys have been filled multiple times: { {key: count for key, count in filled_keys.items() if '.mlp.gate.' not in key and count != 1} }"
-    assert all(count == len(expert_paths) for key, count in filled_keys.items() if ".mlp.gate." in key), f"Not all gate keys have been filled correctly: { {key: count for key, count in filled_keys.items() if '.mlp.gate.' in key and count != len(expert_paths)} }"
+
+    assert set(moe_state_dict.keys()) == set(filled_keys.keys()), (
+        f"Not all keys have been filled: missing {set(moe_state_dict.keys()) - set(filled_keys.keys())}"
+    )
+    assert all(count == 1 for key, count in filled_keys.items() if ".mlp.gate." not in key), (
+        "Some non-gate keys have been filled multiple times: "
+        f"{ {key: count for key, count in filled_keys.items() if '.mlp.gate.' not in key and count != 1} }"
+    )
+    assert all(count == len(expert_paths) for key, count in filled_keys.items() if ".mlp.gate." in key), (
+        "Not all gate keys have been filled correctly: "
+        f"{ {key: count for key, count in filled_keys.items() if '.mlp.gate.' in key and count != len(expert_paths)} }"
+    )
     log.info(f"Saving the merged model to {target_path}")
     model.save_pretrained(target_path, state_dict=moe_state_dict)
     save_target_config(target_path, expert_paths[0], len(expert_paths), dtype)
     log.info(f"Model saved to {target_path}")
+
 
 if __name__ == "__main__":
     main()
