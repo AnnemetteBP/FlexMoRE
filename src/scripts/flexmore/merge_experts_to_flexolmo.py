@@ -156,46 +156,35 @@ def copy_packed_expert_tensors(
     processed_keys: list[str] = []
 
     if "gate_up_proj" in expert_key:
-        base_parts = list(weights[0].chunk(2, dim=0))
-        expert_parts = list(weights[1].chunk(2, dim=0))
-        moe_keys = [
-            expert_key.replace(".experts.gate_up_proj", f".experts.{expert_index}.gate_proj.weight"),
-            expert_key.replace(".experts.gate_up_proj", f".experts.{expert_index}.up_proj.weight"),
-        ]
-        base_keys = [
-            expert_key.replace(".experts.gate_up_proj", ".experts.0.gate_proj.weight"),
-            expert_key.replace(".experts.gate_up_proj", ".experts.0.up_proj.weight"),
-        ]
-        for base_key, moe_key, base_part, expert_part in zip(base_keys, moe_keys, base_parts, expert_parts):
-            if copy_or_validate_tensor(
-                moe_state_dict,
-                filled_keys,
-                base_key,
-                base_part,
-                expert_index,
-                model_path,
-            ):
-                processed_keys.append(base_key)
-            if expert_index:
-                moe_state_dict[moe_key] = expert_part
-                filled_keys[moe_key] += 1
-                processed_keys.append(moe_key)
-    elif "down_proj" in expert_key:
-        base_key = expert_key.replace(".experts.down_proj", ".experts.0.down_proj.weight")
-        moe_key = expert_key.replace(".experts.down_proj", f".experts.{expert_index}.down_proj.weight")
-        if copy_or_validate_tensor(
-            moe_state_dict,
-            filled_keys,
-            base_key,
-            weights[0],
-            expert_index,
-            model_path,
-        ):
-            processed_keys.append(base_key)
         if expert_index:
-            moe_state_dict[moe_key] = weights[1]
-            filled_keys[moe_key] += 1
-            processed_keys.append(moe_key)
+            if not torch.equal(moe_state_dict[expert_key][0], weights[0]):
+                raise_shared_key_mismatch(
+                    expert_index,
+                    model_path,
+                    expert_key,
+                    moe_state_dict[expert_key][0],
+                    weights[0],
+                )
+            moe_state_dict[expert_key][expert_index] = weights[1]
+        else:
+            moe_state_dict[expert_key][0] = weights[0]
+        filled_keys[expert_key] += 1
+        processed_keys.append(expert_key)
+    elif "down_proj" in expert_key:
+        if expert_index:
+            if not torch.equal(moe_state_dict[expert_key][0], weights[0]):
+                raise_shared_key_mismatch(
+                    expert_index,
+                    model_path,
+                    expert_key,
+                    moe_state_dict[expert_key][0],
+                    weights[0],
+                )
+            moe_state_dict[expert_key][expert_index] = weights[1]
+        else:
+            moe_state_dict[expert_key][0] = weights[0]
+        filled_keys[expert_key] += 1
+        processed_keys.append(expert_key)
     else:
         raise AssertionError(f"Unexpected packed expert key {expert_key}")
 
