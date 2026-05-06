@@ -28,6 +28,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "${ROOT_DIR}"
 export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
 
+LOG_FILE="${LOG_FILE:-${ROOT_DIR}/logs/flexmore_v02_selected_eval.log}"
+mkdir -p "$(dirname "${LOG_FILE}")"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+echo "Logging selected-rank pipeline output to ${LOG_FILE}"
+
 if [[ -z "${BASE_MODEL_ROOT:-}" ]]; then
   if [[ -d "/work/training/FlexMoRE/models" ]]; then
     BASE_MODEL_ROOT="/work/training/FlexMoRE/models"
@@ -127,6 +132,21 @@ require_all_inputs() {
   require_path "${NEWS_R16}"
   require_path "${PES2O_R64}"
   require_path "${REDDIT_R32}"
+}
+
+verify_merge_script() {
+  local merge_script="${ROOT_DIR}/src/scripts/flexmore/merge_experts_to_flexolmo.py"
+  require_path "${merge_script}"
+
+  grep -F 'multi_fill_patterns = (".mlp.gate.", ".mlp.experts.gate_up_proj", ".mlp.experts.down_proj")' "${merge_script}" >/dev/null || {
+    echo "Stale merge script detected: missing packed-key multi-fill validator in ${merge_script}" >&2
+    exit 1
+  }
+
+  grep -F 'Loading native FlexOlmo checkpoint from %s' "${merge_script}" >/dev/null || {
+    echo "Stale merge script detected: missing native FlexOlmo load path in ${merge_script}" >&2
+    exit 1
+  }
 }
 
 patch_num_experts_per_tok() {
@@ -398,6 +418,7 @@ launch_group() {
 
 main() {
   require_all_inputs
+  verify_merge_script
   mkdir -p "${EVAL_ROOT}"
 
   build_merged_base
