@@ -8,6 +8,11 @@ import tempfile
 
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
+try:
+    from transformers import FlexOlmoConfig, FlexOlmoForCausalLM
+except ImportError:
+    FlexOlmoConfig = None
+    FlexOlmoForCausalLM = None
 
 try:
     from olmo_core.utils import prepare_cli_environment
@@ -36,6 +41,10 @@ def load_raw_config_dict(path: str) -> dict:
         return json.load(f)
 
 
+def can_use_native_flex_olmo() -> bool:
+    return FlexOlmoConfig is not None and FlexOlmoForCausalLM is not None
+
+
 def prepare_olmoe_compat_dir(model_path: str) -> str:
     src = Path(model_path)
     config = load_raw_config_dict(model_path)
@@ -59,10 +68,29 @@ def prepare_olmoe_compat_dir(model_path: str) -> str:
 
 
 def load_config(path: str):
+    config_dict = load_raw_config_dict(path)
+    if config_dict.get("model_type") == "flex_olmo" and can_use_native_flex_olmo():
+        log.info("Loading native FlexOlmo config from %s", path)
+        return FlexOlmoConfig.from_dict(config_dict)
+    log.info("Loading compat AutoConfig from %s", path)
     return AutoConfig.from_pretrained(prepare_olmoe_compat_dir(path), trust_remote_code=True)
 
 
 def load_model(path: str, dtype):
+    config_dict = load_raw_config_dict(path)
+    if config_dict.get("model_type") == "flex_olmo" and can_use_native_flex_olmo():
+        log.info("Loading native FlexOlmo checkpoint from %s", path)
+        try:
+            return FlexOlmoForCausalLM.from_pretrained(
+                path,
+                torch_dtype=dtype,
+            )
+        except TypeError:
+            return FlexOlmoForCausalLM.from_pretrained(
+                path,
+                dtype=dtype,
+            )
+    log.info("Loading compat AutoModel checkpoint from %s", path)
     compat_path = prepare_olmoe_compat_dir(path)
     try:
         return AutoModelForCausalLM.from_pretrained(
@@ -201,6 +229,11 @@ def parse_args():
 
 
 def main():
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
     prepare_cli_environment()
     args = parse_args()
     expert_paths = args.models
@@ -215,7 +248,10 @@ def main():
     setattr(model_config, "torch_dtype", dtype)
     log.info(f"Building the MoE model on {device} with dtype {dtype}")
     with torch.device(device):
-        model = AutoModelForCausalLM.from_config(model_config, trust_remote_code=True)
+        if getattr(model_config, "model_type", None) == "flex_olmo" and can_use_native_flex_olmo():
+            model = FlexOlmoForCausalLM(model_config)
+        else:
+            model = AutoModelForCausalLM.from_config(model_config, trust_remote_code=True)
     log.info(f"Model loaded on {device} with dtype {dtype}")
     log.info(model)
     moe_state_dict = model.state_dict()
@@ -299,13 +335,18 @@ def main():
     assert set(moe_state_dict.keys()) == set(filled_keys.keys()), (
         f"Not all keys have been filled: missing {set(moe_state_dict.keys()) - set(filled_keys.keys())}"
     )
-    assert all(count == 1 for key, count in filled_keys.items() if ".mlp.gate." not in key), (
-        "Some non-gate keys have been filled multiple times: "
-        f"{ {key: count for key, count in filled_keys.items() if '.mlp.gate.' not in key and count != 1} }"
+    multi_fill_patterns = (".mlp.gate.", ".mlp.experts.gate_up_proj", ".mlp.experts.down_proj")
+    assert all(
+        count == 1 for key, count in filled_keys.items() if not any(pattern in key for pattern in multi_fill_patterns)
+    ), (
+        "Some single-fill keys have been filled multiple times: "
+        f"{ {key: count for key, count in filled_keys.items() if not any(pattern in key for pattern in multi_fill_patterns) and count != 1} }"
     )
-    assert all(count == len(expert_paths) for key, count in filled_keys.items() if ".mlp.gate." in key), (
-        "Not all gate keys have been filled correctly: "
-        f"{ {key: count for key, count in filled_keys.items() if '.mlp.gate.' in key and count != len(expert_paths)} }"
+    assert all(
+        count == len(expert_paths) for key, count in filled_keys.items() if any(pattern in key for pattern in multi_fill_patterns)
+    ), (
+        "Not all multi-fill expert/router keys have been filled correctly: "
+        f"{ {key: count for key, count in filled_keys.items() if any(pattern in key for pattern in multi_fill_patterns) and count != len(expert_paths)} }"
     )
     log.info(f"Saving the merged model to {target_path}")
     model.save_pretrained(target_path, state_dict=moe_state_dict)
