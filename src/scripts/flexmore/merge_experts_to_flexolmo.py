@@ -173,9 +173,10 @@ def copy_packed_expert_tensors(
                 model_path,
             ):
                 processed_keys.append(base_key)
-            moe_state_dict[moe_key] = expert_part
-            filled_keys[moe_key] += 1
-            processed_keys.append(moe_key)
+            if expert_index:
+                moe_state_dict[moe_key] = expert_part
+                filled_keys[moe_key] += 1
+                processed_keys.append(moe_key)
     elif "down_proj" in expert_key:
         base_key = expert_key.replace(".experts.down_proj", ".experts.0.down_proj.weight")
         moe_key = expert_key.replace(".experts.down_proj", f".experts.{expert_index}.down_proj.weight")
@@ -188,9 +189,10 @@ def copy_packed_expert_tensors(
             model_path,
         ):
             processed_keys.append(base_key)
-        moe_state_dict[moe_key] = weights[1]
-        filled_keys[moe_key] += 1
-        processed_keys.append(moe_key)
+        if expert_index:
+            moe_state_dict[moe_key] = weights[1]
+            filled_keys[moe_key] += 1
+            processed_keys.append(moe_key)
     else:
         raise AssertionError(f"Unexpected packed expert key {expert_key}")
 
