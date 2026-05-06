@@ -37,10 +37,10 @@ if [[ -z "${BASE_MODEL_ROOT:-}" ]]; then
 fi
 
 if [[ -z "${RANKED_MODEL_ROOT:-}" ]]; then
-  if [[ -d "/work/training/FlexMoRE/eval_results/models" ]]; then
-    RANKED_MODEL_ROOT="/work/training/FlexMoRE/eval_results/models"
+  if [[ -d "/work/training/FlexMoRE/models" ]]; then
+    RANKED_MODEL_ROOT="/work/training/FlexMoRE/models"
   else
-    RANKED_MODEL_ROOT="${ROOT_DIR}/work/training/FlexMoRE/eval_results/models"
+    RANKED_MODEL_ROOT="${ROOT_DIR}/work/training/FlexMoRE/models"
   fi
 fi
 
@@ -66,14 +66,14 @@ fi
 
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_models}"
 EVAL_ROOT="${EVAL_ROOT:-${ROOT_DIR}/src/scripts/analysis/results/flexmore_v02_selected_evals}"
-MERGE_DEVICE="${MERGE_DEVICE:-}"
-MERGE_DTYPE="${MERGE_DTYPE:-}"
+MERGE_DEVICE="${MERGE_DEVICE:-cpu}"
+MERGE_DTYPE="${MERGE_DTYPE:-bfloat16}"
 GPUS="${GPUS:-1}"
 LIMIT="${LIMIT:-1000}"
 MERGE_PYTHON="${MERGE_PYTHON:-python3}"
-MERGE_CONDA_ENV="${MERGE_CONDA_ENV:-}"
+MERGE_CONDA_ENV="${MERGE_CONDA_ENV:-flexolmo}"
 EVAL_PYTHON="${EVAL_PYTHON:-python3}"
-EVAL_CONDA_ENV="${EVAL_CONDA_ENV:-}"
+EVAL_CONDA_ENV="${EVAL_CONDA_ENV:-olmes_production}"
 
 TASK_GROUPS=(
   mc9

@@ -1,6 +1,10 @@
 import argparse
 from collections import defaultdict
+import json
 import logging
+import os
+from pathlib import Path
+import tempfile
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 
@@ -11,6 +15,7 @@ except ImportError:
         return None
 
 log = logging.getLogger(__name__)
+_TEMP_COMPAT_DIRS: list[str] = []
 
 def dtype_from_string(s):
     match s.lower():
@@ -23,20 +28,62 @@ def dtype_from_string(s):
         case _:
             raise ValueError(f"Unsupported dtype string: {s}")
 
+
+def load_raw_config_dict(path: str) -> dict:
+    with open(Path(path) / "config.json", "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def prepare_olmoe_compat_dir(model_path: str) -> str:
+    src = Path(model_path)
+    config = load_raw_config_dict(model_path)
+    if config.get("model_type") != "flex_olmo":
+        return model_path
+
+    compat_root = Path(tempfile.mkdtemp(prefix="flex_olmo_compat_", dir="/tmp"))
+    _TEMP_COMPAT_DIRS.append(str(compat_root))
+
+    for name in src.iterdir():
+        if name.name == "config.json":
+            continue
+        os.symlink(name, compat_root / name.name)
+
+    compat_config = dict(config)
+    compat_config["model_type"] = "olmoe"
+    compat_config["architectures"] = ["OlmoeForCausalLM"]
+    with open(compat_root / "config.json", "w", encoding="utf-8") as f:
+        json.dump(compat_config, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+    return str(compat_root)
+
+
 def load_config(path: str):
-    return AutoConfig.from_pretrained(path, trust_remote_code=True)
+    return AutoConfig.from_pretrained(prepare_olmoe_compat_dir(path), trust_remote_code=True)
 
 
 def load_model(path: str, dtype):
+    compat_path = prepare_olmoe_compat_dir(path)
     # Different internal transformers forks accept either `torch_dtype` or `dtype`.
     try:
         return AutoModelForCausalLM.from_pretrained(
-            path, torch_dtype=dtype, trust_remote_code=True
+            compat_path, torch_dtype=dtype, trust_remote_code=True
         )
     except TypeError:
         return AutoModelForCausalLM.from_pretrained(
-            path, dtype=dtype, trust_remote_code=True
+            compat_path, dtype=dtype, trust_remote_code=True
         )
+
+
+def save_target_config(target_path: str, source_path: str, num_experts: int, dtype) -> None:
+    config = load_raw_config_dict(source_path)
+    config["num_experts"] = num_experts
+    config["torch_dtype"] = str(dtype).replace("torch.", "")
+    if "dtype" in config:
+        config["dtype"] = str(dtype).replace("torch.", "")
+    with open(Path(target_path) / "config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 def raise_shared_key_mismatch(
@@ -69,6 +116,85 @@ def raise_shared_key_mismatch(
         f"max_abs_diff={max_abs_diff}, "
         f"mean_abs_diff={mean_abs_diff}"
     )
+
+
+def copy_or_validate_tensor(
+    moe_state_dict: dict[str, torch.Tensor],
+    filled_keys: defaultdict[str, int],
+    moe_key: str,
+    source_tensor: torch.Tensor,
+    expert_index: int,
+    model_path: str,
+):
+    if expert_index:
+        if not torch.equal(moe_state_dict[moe_key], source_tensor):
+            raise_shared_key_mismatch(
+                expert_index,
+                model_path,
+                moe_key,
+                moe_state_dict[moe_key],
+                source_tensor,
+            )
+        return False
+
+    moe_state_dict[moe_key] = source_tensor
+    filled_keys[moe_key] += 1
+    return True
+
+
+def copy_packed_expert_tensors(
+    expert_key: str,
+    weights: torch.Tensor,
+    expert_index: int,
+    model_path: str,
+    moe_state_dict: dict[str, torch.Tensor],
+    filled_keys: defaultdict[str, int],
+) -> list[str]:
+    processed_keys: list[str] = []
+
+    if "gate_up_proj" in expert_key:
+        base_parts = list(weights[0].chunk(2, dim=0))
+        expert_parts = list(weights[1].chunk(2, dim=0))
+        moe_keys = [
+            expert_key.replace(".experts.gate_up_proj", f".experts.{expert_index}.gate_proj.weight"),
+            expert_key.replace(".experts.gate_up_proj", f".experts.{expert_index}.up_proj.weight"),
+        ]
+        base_keys = [
+            expert_key.replace(".experts.gate_up_proj", ".experts.0.gate_proj.weight"),
+            expert_key.replace(".experts.gate_up_proj", ".experts.0.up_proj.weight"),
+        ]
+        for base_key, moe_key, base_part, expert_part in zip(base_keys, moe_keys, base_parts, expert_parts):
+            if copy_or_validate_tensor(
+                moe_state_dict,
+                filled_keys,
+                base_key,
+                base_part,
+                expert_index,
+                model_path,
+            ):
+                processed_keys.append(base_key)
+            moe_state_dict[moe_key] = expert_part
+            filled_keys[moe_key] += 1
+            processed_keys.append(moe_key)
+    elif "down_proj" in expert_key:
+        base_key = expert_key.replace(".experts.down_proj", ".experts.0.down_proj.weight")
+        moe_key = expert_key.replace(".experts.down_proj", f".experts.{expert_index}.down_proj.weight")
+        if copy_or_validate_tensor(
+            moe_state_dict,
+            filled_keys,
+            base_key,
+            weights[0],
+            expert_index,
+            model_path,
+        ):
+            processed_keys.append(base_key)
+        moe_state_dict[moe_key] = weights[1]
+        filled_keys[moe_key] += 1
+        processed_keys.append(moe_key)
+    else:
+        raise AssertionError(f"Unexpected packed expert key {expert_key}")
+
+    return processed_keys
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Merge ranked 2x7B experts into one FlexOlmo-style MoE model")
@@ -108,6 +234,22 @@ def main():
         expert_state_dict = expert_model.state_dict()
         log.info(f"Expert {expert} model loaded")
         for expert_key in list(expert_state_dict.keys()):
+            weights = expert_state_dict[expert_key]
+            if ".experts." in expert_key and (
+                ".experts.gate_up_proj" in expert_key or ".experts.down_proj" in expert_key
+            ):
+                processed_keys = copy_packed_expert_tensors(
+                    expert_key,
+                    weights,
+                    expert,
+                    path,
+                    moe_state_dict,
+                    filled_keys,
+                )
+                for processed_key in processed_keys:
+                    log.info(f"Packed expert key {expert_key} populated MoE model key {processed_key}")
+                continue
+
             moe_key = expert_key
             if ".experts.0." in expert_key:
                 if expert:
@@ -159,6 +301,7 @@ def main():
     assert all(count == len(expert_paths) for key, count in filled_keys.items() if ".mlp.gate." in key), f"Not all gate keys have been filled correctly: { {key: count for key, count in filled_keys.items() if '.mlp.gate.' in key and count != len(expert_paths)} }"
     log.info(f"Saving the merged model to {target_path}")
     model.save_pretrained(target_path, state_dict=moe_state_dict)
+    save_target_config(target_path, expert_paths[0], len(expert_paths), dtype)
     log.info(f"Model saved to {target_path}")
 
 if __name__ == "__main__":
