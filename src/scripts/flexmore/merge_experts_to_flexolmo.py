@@ -38,6 +38,38 @@ def load_model(path: str, dtype):
             path, dtype=dtype, trust_remote_code=True
         )
 
+
+def raise_shared_key_mismatch(
+    expert_index: int,
+    model_path: str,
+    moe_key: str,
+    expected: torch.Tensor,
+    actual: torch.Tensor,
+):
+    same_shape = tuple(expected.shape) == tuple(actual.shape)
+    same_dtype = expected.dtype == actual.dtype
+    max_abs_diff = None
+    mean_abs_diff = None
+    if same_shape:
+        diff = (expected.to(dtype=torch.float64) - actual.to(dtype=torch.float64)).abs()
+        max_abs_diff = float(diff.max().item()) if diff.numel() > 0 else 0.0
+        mean_abs_diff = float(diff.mean().item()) if diff.numel() > 0 else 0.0
+
+    raise AssertionError(
+        "Shared key mismatch detected during expert merge: "
+        f"expert={expert_index}, "
+        f"path={model_path}, "
+        f"moe_key={moe_key}, "
+        f"expected_shape={tuple(expected.shape)}, "
+        f"actual_shape={tuple(actual.shape)}, "
+        f"expected_dtype={expected.dtype}, "
+        f"actual_dtype={actual.dtype}, "
+        f"same_shape={same_shape}, "
+        f"same_dtype={same_dtype}, "
+        f"max_abs_diff={max_abs_diff}, "
+        f"mean_abs_diff={mean_abs_diff}"
+    )
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Merge ranked 2x7B experts into one FlexOlmo-style MoE model")
     parser.add_argument("target", help="Target path to save the merged model")
@@ -79,9 +111,14 @@ def main():
             moe_key = expert_key
             if ".experts.0." in expert_key:
                 if expert:
-                    assert torch.equal(
-                        moe_state_dict[moe_key], expert_state_dict[expert_key]
-                    ), f"Shared key {moe_key} is different"
+                    if not torch.equal(moe_state_dict[moe_key], expert_state_dict[expert_key]):
+                        raise_shared_key_mismatch(
+                            expert,
+                            path,
+                            moe_key,
+                            moe_state_dict[moe_key],
+                            expert_state_dict[expert_key],
+                        )
                     moe_key = None
             elif ".experts.1." in expert_key:
                 if expert:
@@ -101,9 +138,14 @@ def main():
                 filled_keys[moe_key] += 1
                 moe_key = None
             elif expert:
-                assert torch.equal(
-                    moe_state_dict[moe_key], expert_state_dict[expert_key]
-                ), f"Shared key {moe_key} is different"
+                if not torch.equal(moe_state_dict[moe_key], expert_state_dict[expert_key]):
+                    raise_shared_key_mismatch(
+                        expert,
+                        path,
+                        moe_key,
+                        moe_state_dict[moe_key],
+                        expert_state_dict[expert_key],
+                    )
                 moe_key = None
             if moe_key:
                 moe_state_dict[moe_key] = expert_state_dict[expert_key]
