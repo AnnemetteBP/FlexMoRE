@@ -103,7 +103,7 @@ def main():
             elif expert:
                 assert torch.equal(
                     moe_state_dict[moe_key], expert_state_dict[expert_key]
-                ), f"Sharedf key {key} is different"
+                ), f"Shared key {moe_key} is different"
                 moe_key = None
             if moe_key:
                 moe_state_dict[moe_key] = expert_state_dict[expert_key]
